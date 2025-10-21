@@ -68,7 +68,7 @@ def load_artifacts():
     if joblib:
         try: prophet_model = joblib.load(_asset("prophet_model.pkl"))
         except Exception: pass
-        try: xgb_model = joblib.load(_asset("xgboost_model.pkl"))
+        try: xgb_model = joblib.load(_asset("xgboost_model.json"))
         except Exception: pass
         try: lgbm_model = joblib.load(_asset("lightgbm_model.pkl"))
         except Exception: pass
