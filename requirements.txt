@@ -10,6 +10,8 @@ joblib
 # Machine Learning Models
 prophet
 xgboost
+lightgbm
+randomforest
 
 # Visualization
 plotly
