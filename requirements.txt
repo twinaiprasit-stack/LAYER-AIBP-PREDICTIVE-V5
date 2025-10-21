@@ -1,0 +1,20 @@
+# Core framework
+streamlit
+
+# Data science
+pandas
+numpy
+scikit-learn
+joblib
+
+# Machine Learning Models
+prophet
+xgboost
+
+# Visualization
+plotly
+matplotlib
+kaleido
+
+# PDF Export
+reportlab
