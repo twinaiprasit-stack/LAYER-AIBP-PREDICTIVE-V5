@@ -168,28 +168,90 @@ def page1():
     fig.update_layout(title=f"Actual vs Predicted ({horizon}-week)",template="plotly_dark",xaxis_title="Date",yaxis_title="Price (฿/ฟอง)")
     st.plotly_chart(fig,use_container_width=True)
 
-def page2():
-    render_header("🧠 Stacking Model Performance","Actual vs Stacking Prediction (52-week)")
-    m=HORIZON_METRICS[52]; render_kpis(m)
-    pf,act=load_prophet_forecast(),load_actual_df()
-    if pf is None: return
-    df=merge_forecast_actual(pf,act)
-    preds=[df["Prophet"]]; unavail=[]
-    for mdl,name in [(XGB,"XGB"),(LGBM,"LGBM"),(RF,"RF")]:
-        s=predict_with_model(mdl,SCALER,FEAT_NAMES,df,name)
-        if s is not None: preds.append(s)
-        else: unavail.append(name)
-    df["Stacking"]=pd.concat(preds,axis=1).mean(axis=1)
-    df52=subset_horizon(df,52)
-    fig=go.Figure()
-    if "Actual" in df52.columns: fig.add_trace(go.Scatter(x=df52["ds"],y=df52["Actual"],mode="lines",name="Actual",line=dict(width=3)))
-    fig.add_trace(go.Scatter(x=df52["ds"],y=df52["Stacking"],mode="lines",name="Stacking Predicted",line=dict(width=3)))
-    fig.update_layout(title="Actual vs Stacking (52w)",template="plotly_dark",xaxis_title="Date",yaxis_title="Price (฿/ฟอง)")
-    st.plotly_chart(fig,use_container_width=True)
-    if unavail: st.info("Unavailable models: "+", ".join(unavail))
+def page2_stacking():
+    # ----- Header -----
+    render_header("🧠 Stacking Model Performance — Prophet Hybrid (XGBoost + LightGBM + RandomForest)",
+                  "Actual vs Stacking Prediction (52-week)")
+    metrics = HORIZON_METRICS[52]
+    render_kpis(metrics)
 
-inject_layerx_css()
-st.sidebar.title("Navigation")
-pg=st.sidebar.radio("เลือกหน้า",["Page 1 — Forecast","Page 2 — Stacking (52w)"],index=0)
-if pg.startswith("Page 1"): page1()
-else: page2()
+    # ----- Load Data -----
+    pf = load_prophet_forecast()
+    if pf is None:
+        st.error("ไม่พบไฟล์ prophet_forecast.csv")
+        return
+
+    # Actual data: use new file and correct column name
+    actual_csv = _asset("Predict Egg Price 2022-25 with Date - Test_Pmhoo + Layinghen.csv",
+                        "/mnt/data/Predict Egg Price 2022-25 with Date - Test_Pmhoo + Layinghen.csv")
+    actual = None
+    if _exists(actual_csv):
+        try:
+            a = pd.read_csv(actual_csv)
+            date_col = "Date" if "Date" in a.columns else ("date" if "date" in a.columns else None)
+            if date_col and "PriceMarket" in a.columns:
+                a[date_col] = pd.to_datetime(a[date_col], dayfirst=True, errors="coerce")
+                a = (a.sort_values(date_col)
+                       .set_index(date_col)
+                       .resample("W")
+                       .mean()
+                       .rename_axis("ds")
+                       .reset_index())
+                actual = a[["ds", "PriceMarket"]].rename(columns={"PriceMarket": "Actual"})
+            else:
+                st.warning("⚠️ ไฟล์ Actual ไม่มีคอลัมน์ Date/PriceMarket")
+        except Exception as e:
+            st.warning(f"อ่านไฟล์ Actual ไม่สำเร็จ: {e}")
+    else:
+        st.sidebar.warning("ไม่พบไฟล์ Actual: Predict Egg Price 2022-25 with Date - Test_Pmhoo + Layinghen.csv")
+
+    # ----- Merge Forecast + Actual -----
+    df = merge_forecast_actual(pf, actual)
+    df52 = subset_horizon(df, 52)
+
+    # Prophet = Stacking model (already combined)
+    df52["Stacking"] = df52["Prophet"]
+
+    # ----- Plot -----
+    fig = go.Figure()
+    if "Actual" in df52.columns and df52["Actual"].notna().any():
+        fig.add_trace(go.Scatter(
+            x=df52["ds"], y=df52["Actual"], mode="lines",
+            name="Actual (PriceMarket)", line=dict(width=3, color="#00c2ff")
+        ))
+    fig.add_trace(go.Scatter(
+        x=df52["ds"], y=df52["Stacking"], mode="lines",
+        name="Stacking (Prophet + XGB + LGBM + RF)", line=dict(width=3, color="#ffaa00")
+    ))
+
+    fig.update_layout(
+        title="Actual vs Stacking (Prophet Hybrid Model — 52-week)",
+        template="plotly_dark", height=500,
+        margin=dict(l=20, r=20, t=60, b=50),
+        xaxis_title="Date", yaxis_title="Price (฿/ฟอง)",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ----- Model Info -----
+    st.markdown(
+        """
+        <div style="margin-top:15px; font-size:13px; color:#a8dfff;">
+        🧩 <b>Note:</b> Prophet model เป็นผลรวมจากการ stack <b>XGBoost</b>, <b>LightGBM</b> และ <b>RandomForest</b> ซึ่งเป็น hybrid model เพื่อให้ผลลัพธ์มีความแม่นยำมากขึ้น
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # ----- PDF Export -----
+    st.markdown('<div class="lx-btn" style="text-align:center;">', unsafe_allow_html=True)
+    if st.button("🧾 Export PDF Summary (Page 2)"):
+        mlist = [("MAE", f"{metrics['MAE']:.4f}"),
+                 ("MSE", f"{metrics['MSE']:.4f}"),
+                 ("RMSE", f"{metrics['RMSE']:.4f}"),
+                 ("R²", f"{metrics['R2']:.4f}")]
+        pdf = export_pdf_report("Stacking Model Performance — Prophet Hybrid (52-week)", mlist, fig)
+        st.download_button("📥 ดาวน์โหลด PDF", data=pdf, file_name="LayerX_Stacking_52w_Hybrid.pdf", mime="application/pdf")
+    st.markdown('</div>', unsafe_allow_html=True)
+
